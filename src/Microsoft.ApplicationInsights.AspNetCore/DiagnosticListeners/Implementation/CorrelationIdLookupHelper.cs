@@ -120,24 +120,34 @@ namespace Microsoft.ApplicationInsights.AspNetCore.DiagnosticListeners
                     // If we are still waiting on the result beyond the timeout - for this particular call we return the failure but queue a task continuation for it to be cached for next time.
                     string iKeyLowered = instrumentationKey.ToLowerInvariant();
                     int taskId;
-                    if (!this.iKeyTaskIdMapping.TryGetValue(iKeyLowered, out taskId))
+
+
+                    if (!this.iKeyTaskIdMapping.TryAdd(iKeyLowered, int.MinValue))
                     {
                         Task<string> getAppIdTask = this.provideAppId(iKeyLowered);
+                        taskId = getAppIdTask.Id;
+                        this.iKeyTaskIdMapping.TryUpdate(iKeyLowered, taskId, int.MinValue);
                         if (getAppIdTask.Wait(GetAppIdTimeout))
                         {
-                            if (string.IsNullOrEmpty(getAppIdTask.Result))
+                            try
                             {
-                                correlationId = string.Empty;
+                                if (string.IsNullOrEmpty(getAppIdTask.Result))
+                                {
+                                    correlationId = string.Empty;
+                                }
+                                else
+                                {
+                                    correlationId = this.GenerateCorrelationIdAndAddToDictionary(instrumentationKey, getAppIdTask.Result);
+                                }
+                                return true;
                             }
-                            else
+                            finally
                             {
-                                correlationId = this.GenerateCorrelationIdAndAddToDictionary(instrumentationKey, getAppIdTask.Result);
+                                ReleaseTaskForFetchingAppId(iKeyLowered);
                             }
-                            return true;
                         }
                         else
                         {
-                            this.iKeyTaskIdMapping.TryAdd(iKeyLowered, getAppIdTask.Id);
                             getAppIdTask.ContinueWith((appId) =>
                             {
                                 try
@@ -150,8 +160,7 @@ namespace Microsoft.ApplicationInsights.AspNetCore.DiagnosticListeners
                                 }
                                 finally
                                 {
-                                    int currentTaskId;
-                                    iKeyTaskIdMapping.TryRemove(iKeyLowered, out currentTaskId);
+                                    ReleaseTaskForFetchingAppId(iKeyLowered);
                                 }
                             });
                             return false;
@@ -170,6 +179,12 @@ namespace Microsoft.ApplicationInsights.AspNetCore.DiagnosticListeners
                     return false;
                 }
             }
+        }
+
+        private void ReleaseTaskForFetchingAppId(string key)
+        {
+            int currentTaskId;
+            iKeyTaskIdMapping.TryRemove(key, out currentTaskId);
         }
 
         private string GenerateCorrelationIdAndAddToDictionary(string ikey, string appId)
