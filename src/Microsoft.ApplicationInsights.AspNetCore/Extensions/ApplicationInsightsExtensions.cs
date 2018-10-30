@@ -16,7 +16,7 @@
     using Microsoft.ApplicationInsights.Extensibility.Implementation.ApplicationId;
     using Microsoft.ApplicationInsights.Extensibility.PerfCounterCollector;
     using Microsoft.ApplicationInsights.Extensibility.PerfCounterCollector.QuickPulse;
-    using Microsoft.ApplicationInsights.WindowsServer;    
+    using Microsoft.ApplicationInsights.WindowsServer;
     using Microsoft.ApplicationInsights.WindowsServer.TelemetryChannel;
     using Microsoft.AspNetCore.Hosting;
     using Microsoft.AspNetCore.Http;
@@ -122,7 +122,7 @@
         }
 
         /// <summary>
-        /// Adds Application Insights services into service collection.
+        /// Adds Application Insights services for ASP.NET Core into service collection.
         /// </summary>
         /// <param name="services">The <see cref="IServiceCollection"/> instance.</param>
         /// <returns>
@@ -130,15 +130,12 @@
         /// </returns>
         public static IServiceCollection AddApplicationInsightsTelemetry(this IServiceCollection services)
         {
-            if (!IsApplicationInsightsAdded(services))
+            if (!IsApplicationInsightsForAspNetCoreAdded(services))
             {
+                services = services.InjectApplicationInsightsBasics();
+
                 services.TryAddSingleton<IHttpContextAccessor, HttpContextAccessor>();
 
-                services
-                    .AddSingleton<ITelemetryInitializer, ApplicationInsights.AspNetCore.TelemetryInitializers.
-                        DomainNameRoleInstanceTelemetryInitializer>();
-                services.AddSingleton<ITelemetryInitializer, AzureWebAppRoleEnvironmentTelemetryInitializer>();
-                services.AddSingleton<ITelemetryInitializer, ComponentVersionTelemetryInitializer>();
                 services.AddSingleton<ITelemetryInitializer, ClientIpHeaderTelemetryInitializer>();
                 services.AddSingleton<ITelemetryInitializer, OperationNameTelemetryInitializer>();
                 services.AddSingleton<ITelemetryInitializer, SyntheticTelemetryInitializer>();
@@ -146,7 +143,6 @@
                 services.AddSingleton<ITelemetryInitializer, WebUserTelemetryInitializer>();
                 services.AddSingleton<ITelemetryInitializer, AspNetCoreEnvironmentTelemetryInitializer>();
                 services.AddSingleton<ITelemetryInitializer, HttpDependenciesParsingTelemetryInitializer>();
-                services.TryAddSingleton<ITelemetryChannel, ServerTelemetryChannel>();
 
                 services.AddSingleton<ITelemetryModule, DependencyTrackingTelemetryModule>();
                 services.ConfigureTelemetryModule<DependencyTrackingTelemetryModule>((module, o) =>
@@ -171,35 +167,15 @@
                     module.CollectionOptions = options.RequestCollectionOptions;
                 });
 
-                services.AddSingleton<ITelemetryModule, PerformanceCollectorModule>();
                 services.AddSingleton<ITelemetryModule, AppServicesHeartbeatTelemetryModule>();
-                services.AddSingleton<ITelemetryModule, AzureInstanceMetadataTelemetryModule>();
-                services.AddSingleton<ITelemetryModule, QuickPulseTelemetryModule>();
                 services.AddSingleton<ITelemetryModule, RequestTrackingTelemetryModule>();
-                services.AddSingleton<TelemetryConfiguration>(provider =>
-                    provider.GetService<IOptions<TelemetryConfiguration>>().Value);
 
-                services.TryAddSingleton<IApplicationIdProvider, ApplicationInsightsApplicationIdProvider>();
-
-                services.AddSingleton<TelemetryClient>();
-
-                services.AddSingleton<ApplicationInsightsDebugLogger, ApplicationInsightsDebugLogger>();
-
-                services
-                    .TryAddSingleton<IConfigureOptions<ApplicationInsightsServiceOptions>,
+                services.TryAddSingleton<IConfigureOptions<ApplicationInsightsServiceOptions>,
                         DefaultApplicationInsightsServiceConfigureOptions>();
 
-                // Using startup filter instead of starting DiagnosticListeners directly because
-                // AspNetCoreHostingDiagnosticListener injects TelemetryClient that injects TelemetryConfiguration
-                // that requires IOptions infrastructure to run and initialize
-                services.AddSingleton<IStartupFilter, ApplicationInsightsStartupFilter>();
-
                 services.AddSingleton<JavaScriptSnippet>();
-                services.AddSingleton<ApplicationInsightsLoggerEvents>();
 
-                services.AddOptions();
-                services.AddSingleton<IOptions<TelemetryConfiguration>, TelemetryConfigurationOptions>();
-                services.AddSingleton<IConfigureOptions<TelemetryConfiguration>, TelemetryConfigurationOptionsSetup>();
+                services.AddSingleton<TelemetryClient>();
             }
 
             return services;
@@ -284,7 +260,7 @@
             }
 
             return services.AddSingleton(typeof(ITelemetryModuleConfigurator),
-                new TelemetryModuleConfigurator((config, options) => configModule((T) config, options), typeof(T)));
+                new TelemetryModuleConfigurator((config, options) => configModule((T)config, options), typeof(T)));
         }
 
         /// <summary>
@@ -328,11 +304,57 @@
 
             if (wasAnythingSet)
             {
-                configurationSourceRoot.Add(new MemoryConfigurationSource() {InitialData = telemetryConfigValues});
+                configurationSourceRoot.Add(new MemoryConfigurationSource() { InitialData = telemetryConfigValues });
             }
 
             return configurationSourceRoot;
         }
+
+#if NETSTANDARD2_0
+        /// <summary>
+        /// Adds Application Insights services for .NET Core into service collection.
+        /// </summary>
+        /// <param name="services">The <see cref="IServiceCollection"/> instance.</param>
+        /// <returns>The <see cref="IServiceCollection"/>.</returns>
+        public static IServiceCollection AddGenericApplicationInsightsTelemetry(this IServiceCollection services)
+        {
+            if (!IsApplicationInsightsForNetCoreAdded(services))
+            {
+                services = services.InjectApplicationInsightsBasics();
+
+                services.TryAddSingleton<IConfigureOptions<ApplicationInsightsServiceOptions>,
+                        Microsoft.Extensions.Hosting.GenericHostApplicationInsightsServiceConfigurationOptions>();
+                services.AddSingleton<TelemetryClient>();
+            }
+            return services;
+        }
+
+        /// <summary>
+        /// Adds Application Insights services for .NET Core into service collection.
+        /// </summary>
+        /// <param name="services">The <see cref="IServiceCollection"/> instance.</param>
+        /// <param name="instrumentationKey">Instrumentation key to use for telemetry.</param>
+        /// <returns>The <see cref="IServiceCollection"/>.</returns>
+        public static IServiceCollection AddGenericApplicationInsightsTelemetry(this IServiceCollection services, string instrumentationKey)
+        {
+            services.AddGenericApplicationInsightsTelemetry(options => options.InstrumentationKey = instrumentationKey);
+            return services;
+        }
+
+        /// <summary>
+        /// Adds Application Insights services for .NET Core into service collection.
+        /// </summary>
+        /// <param name="services">The <see cref="IServiceCollection"/> instance.</param>
+        /// <param name="options">The action used to configure the options.</param>
+        /// <returns>The <see cref="IServiceCollection"/>.</returns>
+        public static IServiceCollection AddGenericApplicationInsightsTelemetry(this IServiceCollection services,
+                Action<ApplicationInsightsServiceOptions> options)
+        {
+            services.AddGenericApplicationInsightsTelemetry();
+            services.Configure(options);
+            return services;
+        }
+#endif
 
         /// <summary>
         /// Read from configuration
@@ -397,10 +419,49 @@
             }
         }
 
-        private static bool IsApplicationInsightsAdded(IServiceCollection services)
+        private static IServiceCollection InjectApplicationInsightsBasics(this IServiceCollection services)
         {
-            // We treat ApplicationInsightsDebugLogger as a marker that AI services were added to service collection
+            // Initializers
+            services.AddSingleton<ITelemetryInitializer, AzureWebAppRoleEnvironmentTelemetryInitializer>();
+            services.AddSingleton<ITelemetryInitializer, ComponentVersionTelemetryInitializer>();
+            services.AddSingleton<ITelemetryInitializer,
+                ApplicationInsights.AspNetCore.TelemetryInitializers.DomainNameRoleInstanceTelemetryInitializer>();
+            services.TryAddSingleton<ITelemetryChannel, ServerTelemetryChannel>();
+
+            // Modules
+            services.AddSingleton<ITelemetryModule, PerformanceCollectorModule>();
+            services.AddSingleton<ITelemetryModule, AzureInstanceMetadataTelemetryModule>();
+            services.AddSingleton<ITelemetryModule, QuickPulseTelemetryModule>();
+
+            services.AddSingleton<TelemetryConfiguration>(provider =>
+                provider.GetService<IOptions<TelemetryConfiguration>>().Value);
+
+            services.TryAddSingleton<IApplicationIdProvider, ApplicationInsightsApplicationIdProvider>();
+
+            // Using startup filter instead of starting DiagnosticListeners directly because
+            // AspNetCoreHostingDiagnosticListener injects TelemetryClient that injects TelemetryConfiguration
+            // that requires IOptions infrastructure to run and initialize
+            services.AddSingleton<IStartupFilter, ApplicationInsightsStartupFilter>();
+            services.AddSingleton<ApplicationInsightsLoggerEvents>();
+
+            services.AddOptions();
+            services.AddSingleton<IOptions<TelemetryConfiguration>, TelemetryConfigurationOptions>();
+            services.AddSingleton<IConfigureOptions<TelemetryConfiguration>, TelemetryConfigurationOptionsSetup>();
+
+            services.AddSingleton<ApplicationInsightsDebugLogger, ApplicationInsightsDebugLogger>();
+            return services;
+        }
+
+        private static bool IsApplicationInsightsForNetCoreAdded(IServiceCollection services)
+        {
+            // We treat ApplicationInsightsDebugLogger as a marker that AI services for .NET Core were added to service collection
             return services.Any(service => service.ServiceType == typeof(ApplicationInsightsDebugLogger));
+        }
+
+        private static bool IsApplicationInsightsForAspNetCoreAdded(IServiceCollection services)
+        {
+            // We treat RequestTrackingTelemetryModule as a marker that AI services for ASP.NET were added to service collection
+            return services.Any(service => service.ServiceType == typeof(RequestTrackingTelemetryModule));
         }
     }
 }

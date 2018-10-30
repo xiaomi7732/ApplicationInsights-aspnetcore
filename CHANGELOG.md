@@ -1,5 +1,8 @@
 # Changelog
 
+## Version 2.5.2
+- Add support for Generic Host Builder.
+
 ## Version 2.5.1
 - Update Web/Base SDK version dependency to 2.8.1
 
